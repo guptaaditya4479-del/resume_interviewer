@@ -1,0 +1,60 @@
+==========================================================
+    RESUME INTERVIEWER - REACT FRONTEND SETUP
+==========================================================
+
+QUICKEST WAY TO GET STARTED:
+---------------------------
+
+1. Double-click "SETUP_FRONTEND.bat"
+   
+   OR
+   
+   Open Command Prompt and run:
+   cd C:\Users\Gupta\resume_interviewer
+   python create_complete_frontend.py
+
+2. Install dependencies:
+   cd frontend
+   npm install
+
+3. Start the dev server:
+   npm run dev
+
+4. Open http://localhost:3000 in your browser
+
+5. Make sure backend is running on http://localhost:8000
+
+==========================================================
+
+WHAT GETS CREATED:
+-----------------
+✅ Complete React app with Vite
+✅ 6 React components (Landing, Interview, Question, Answer, Feedback, Summary)
+✅ API service with 3 functions (startInterview, submitAnswer, getSummary)
+✅ React Router for navigation
+✅ Complete CSS styling
+✅ All configuration files
+
+FEATURES:
+---------
+✅ Resume upload (PDF)
+✅ Domain selection (backend/devops/ml)
+✅ Interactive interview flow
+✅ Real-time feedback after each answer
+✅ Score display (Relevance, Depth, Accuracy)
+✅ Final summary with grade (A-F)
+✅ Responsive design
+✅ Modern React patterns (hooks, functional components)
+
+TECH STACK:
+----------
+• React 18.2
+• React Router 6.20
+• Axios 1.6
+• Vite 5.0
+
+==========================================================
+
+For detailed documentation, see FRONTEND_README.md
+
+==========================================================

@@ -1,10 +1,19 @@
 import os
 import json
 from openai import OpenAI
+from config import Config
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO if Config.DEBUG else logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 client = OpenAI(
-    api_key="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",
-    base_url="https://openrouter.ai/api/v1"
+    api_key=Config.OPENROUTER_API_KEY,
+    base_url=Config.OPENAI_BASE_URL
 )
 
 JD_DATABASE = {
@@ -42,7 +51,8 @@ Machine Learning Engineer Responsibilities:
 
 
 def extract_structured_data(resume_text):
-
+    logger.info("Starting structured data extraction from resume")
+    
     prompt = f"""
 Extract structured information from this resume.
 
@@ -65,33 +75,44 @@ Resume:
 {resume_text}
 """
 
-    response = client.chat.completions.create(
-        model="mistralai/mistral-7b-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
-    )
-
-    content = response.choices[0].message.content.strip()
-
-    print("MODEL OUTPUT:", content)  # 👈 TEMP DEBUG
-
-    if not content:
-        return empty_structure()
-
     try:
-        return json.loads(content)
-    except Exception:
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != -1 and start < end:
-            try:
-                cleaned = content[start:end]
-                return json.loads(cleaned)
-            except:
-                return empty_structure()
-        else:
+        response = client.chat.completions.create(
+            model=Config.OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        
+        content = response.choices[0].message.content.strip()
+        logger.debug(f"Model response for structured data: {content[:100]}...")
+        
+        if not content:
+            logger.warning("Empty response from model")
             return empty_structure()
+        
+        try:
+            result = json.loads(content)
+            logger.info("Successfully parsed structured data")
+            return result
+        except Exception as e:
+            logger.warning(f"JSON parse failed, attempting cleanup: {e}")
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            
+            if start != -1 and end != -1 and start < end:
+                try:
+                    cleaned = content[start:end]
+                    result = json.loads(cleaned)
+                    logger.info("Successfully parsed cleaned JSON")
+                    return result
+                except Exception as e2:
+                    logger.error(f"Failed to parse cleaned JSON: {e2}")
+                    return empty_structure()
+            else:
+                logger.error("Could not find valid JSON structure")
+                return empty_structure()
+    except Exception as e:
+        logger.error(f"Error in extract_structured_data: {e}", exc_info=True)
+        return empty_structure()
 
 
 def empty_structure():
@@ -161,7 +182,8 @@ def empty_structure():
 # -------- Stage 3: Question Generation --------
 
 def generate_questions(structured_data, jd_text):
-
+    logger.info("Generating interview questions")
+    
     prompt = f"""
 You are a strict but realistic senior technical interviewer.
 
@@ -192,62 +214,74 @@ No explanations.
 No extra keys.
 """
 
-    response = client.chat.completions.create(
-        model="mistralai/mistral-7b-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7
-    )
-
-    content = response.choices[0].message.content.strip()
-    content = content.replace("\n", " ").replace("\r", " ")
-
-    # -------- SAFE JSON PARSING --------
     try:
-        result = json.loads(content)
-    except Exception:
-        start = content.find("{")
-        end = content.rfind("}") + 1
+        response = client.chat.completions.create(
+            model=Config.OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
 
-        if start != -1 and end != -1 and start < end:
-            cleaned = content[start:end]
-            cleaned = cleaned.replace("\n", " ").replace("\r", " ")
-            try:
-                result = json.loads(cleaned)
-            except Exception:
+        content = response.choices[0].message.content.strip()
+        content = content.replace("\n", " ").replace("\r", " ")
+        logger.debug(f"Question generation response: {content[:100]}...")
+
+        # -------- SAFE JSON PARSING --------
+        try:
+            result = json.loads(content)
+        except Exception as e:
+            logger.warning(f"JSON parse failed for questions, attempting cleanup: {e}")
+            start = content.find("{")
+            end = content.rfind("}") + 1
+
+            if start != -1 and end != -1 and start < end:
+                cleaned = content[start:end]
+                cleaned = cleaned.replace("\n", " ").replace("\r", " ")
+                try:
+                    result = json.loads(cleaned)
+                except Exception as e2:
+                    logger.error(f"Failed to parse cleaned question JSON: {e2}")
+                    result = {}
+            else:
+                logger.error("Could not find valid JSON structure in questions")
                 result = {}
-        else:
-            result = {}
 
-    # -------- BUILD QUESTION LIST --------
-    questions = []
+        # -------- BUILD QUESTION LIST --------
+        questions = []
 
-    # Intro
-    questions.append({
-        "type": "intro",
-        "text": "Tell me about yourself."
-    })
-
-    # JD Questions
-    for q in result.get("jd_questions", []):
+        # Intro
         questions.append({
-            "type": "jd",
-            "text": q
+            "type": "intro",
+            "text": "Tell me about yourself."
         })
 
-    # Resume Questions
-    for q in result.get("resume_questions", []):
-        questions.append({
-            "type": "resume",
-            "text": q
-        })
+        # JD Questions
+        for q in result.get("jd_questions", []):
+            questions.append({
+                "type": "jd",
+                "text": q
+            })
 
-    return questions
+        # Resume Questions
+        for q in result.get("resume_questions", []):
+            questions.append({
+                "type": "resume",
+                "text": q
+            })
+
+        logger.info(f"Generated {len(questions)} questions total")
+        return questions
+        
+    except Exception as e:
+        logger.error(f"Error in generate_questions: {e}", exc_info=True)
+        # Return at least the intro question
+        return [{"type": "intro", "text": "Tell me about yourself."}]
     
 
 
 
 def evaluate_answer(question, answer, structured_data):
-
+    logger.info(f"Evaluating answer for question: {question[:50]}...")
+    
     prompt = f"""
 You are a strict but realistic technical interviewer.
 
@@ -292,56 +326,71 @@ Rules:
 - Only return valid JSON.
 """
 
-    response = client.chat.completions.create(
-        model="mistralai/mistral-7b-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.4
-    )
-
-    content = response.choices[0].message.content.strip()
-
-    # 🔥 Remove problematic control characters
-    content = content.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-
     try:
-        return json.loads(content)
+        response = client.chat.completions.create(
+            model=Config.OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4
+        )
 
-    except Exception:
-        start = content.find("{")
-        end = content.rfind("}") + 1
+        content = response.choices[0].message.content.strip()
+        content = content.replace("\n", " ").replace("\r", " ").replace("\t", " ")
 
-        if start != -1 and end != -1 and start < end:
-            cleaned = content[start:end]
-            cleaned = cleaned.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+        try:
+            result = json.loads(content)
+            logger.info(f"Answer evaluated with score: {result.get('score', 'N/A')}")
+            return result
 
-            try:
-                return json.loads(cleaned)
-            except Exception:
-                pass
+        except Exception as e:
+            logger.warning(f"JSON parse failed for evaluation, attempting cleanup: {e}")
+            start = content.find("{")
+            end = content.rfind("}") + 1
 
-    # 🔥 Safe fallback so server never crashes
-    return {
-        "score": 5,
-        "strengths": "Could not fully evaluate.",
-        "weaknesses": "Parsing error occurred.",
-        "follow_up_question": ""
-    }
+            if start != -1 and end != -1 and start < end:
+                cleaned = content[start:end]
+                cleaned = cleaned.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+                try:
+                    result = json.loads(cleaned)
+                    logger.info(f"Answer evaluated (after cleanup) with score: {result.get('score', 'N/A')}")
+                    return result
+                except Exception as e2:
+                    logger.error(f"Failed to parse cleaned evaluation JSON: {e2}")
+                    pass
+
+        # Safe fallback
+        logger.warning("Returning fallback evaluation due to parsing errors")
+        return {
+            "score": 5,
+            "strengths": "Could not fully evaluate.",
+            "weaknesses": "Parsing error occurred.",
+            "follow_up_question": ""
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in evaluate_answer: {e}", exc_info=True)
+        return {
+            "score": 5,
+            "strengths": "Evaluation error occurred.",
+            "weaknesses": "System error during evaluation.",
+            "follow_up_question": ""
+        }
 
 
 
 
-# -------- MASTER PIPELINE --------
 def run_pipeline(resume_text, domain):
-
+    logger.info(f"Running interview pipeline for domain: {domain}")
+    
     structured_data = extract_structured_data(resume_text)
     jd_text = JD_DATABASE.get(domain.lower(), "")
+    
+    if not jd_text:
+        logger.warning(f"Unknown domain: {domain}")
 
+    questions = generate_questions(structured_data, jd_text)
 
-  #  analysis = analyze_resume(resume_text)
-  #  priorities = prioritize_strengths(analysis)
-
-    questions = generate_questions(structured_data,jd_text)
-
+    logger.info(f"Pipeline completed successfully")
     return {
         "structured_data": structured_data,
         "questions": questions
